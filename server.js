@@ -60,9 +60,7 @@ function assinarXmlDps(xml, certPem, keyPem, certClean, idDps) {
     ]
   });
 
-  sig.keyInfoProvider = {
-    getKeyInfo: () => `<X509Data><X509Certificate>${certClean}</X509Certificate></X509Data>`
-  };
+  sig.getKeyInfoContent = () => `<X509Data><X509Certificate>${certClean}</X509Certificate></X509Data>`;
 
   sig.computeSignature(xml, {
     location: { reference: `//*[@Id='${idDps}']`, action: 'after' }
