@@ -2,7 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const https = require('https');
 const zlib = require('zlib');
-const forge = require('node-forge');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const { SignedXml } = require('xml-crypto');
 const axios = require('axios');
 
@@ -16,23 +19,28 @@ app.get('/', (req, res) => {
 
 function extrairCertificadoPfx(pfxBase64, senha) {
   const cleanB64 = pfxBase64.replace(/^data:.*?;base64,/, '');
-  const pfxDer = forge.util.decode64(cleanB64);
-  const pfxAsn1 = forge.asn1.fromDer(pfxDer);
-  const p12 = forge.pkcs12.pkcs12FromAsn1(pfxAsn1, false, senha);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfse-'));
+  const pfxPath = path.join(tmpDir, 'cert.pfx');
+  const certPath = path.join(tmpDir, 'cert.pem');
+  const keyPath = path.join(tmpDir, 'key.pem');
 
-  const certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag];
-  const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag]
-    || p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag];
+  try {
+    fs.writeFileSync(pfxPath, Buffer.from(cleanB64, 'base64'));
+    execFileSync('openssl', ['pkcs12', '-in', pfxPath, '-clcerts', '-nokeys', '-out', certPath, '-passin', `pass:${senha}`]);
+    execFileSync('openssl', ['pkcs12', '-in', pfxPath, '-nocerts', '-nodes', '-out', keyPath, '-passin', `pass:${senha}`]);
 
-  if (!certBags?.length || !keyBags?.length) {
-    throw new Error('Não foi possível ler o certificado ou chave privada do PFX. Verifique a senha.');
+    const certPem = fs.readFileSync(certPath, 'utf-8');
+    const keyPem = fs.readFileSync(keyPath, 'utf-8');
+    const certMatch = certPem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/);
+    if (!certMatch) throw new Error('Certificado não encontrado dentro do PFX.');
+
+    const certClean = certMatch[0].replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\r|\n/g, '');
+    return { certPem: certMatch[0], keyPem, certClean };
+  } catch (e) {
+    throw new Error('Não foi possível abrir o certificado A1. Confira se a senha está correta.');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-
-  const certPem = forge.pki.certificateToPem(certBags[0].cert);
-  const keyPem = forge.pki.privateKeyToPem(keyBags[0].key);
-  const certClean = certPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\r|\n/g, '');
-
-  return { certPem, keyPem, certClean };
 }
 
 function gerarIdDps(cMun, cnpj, serie, nDps) {
