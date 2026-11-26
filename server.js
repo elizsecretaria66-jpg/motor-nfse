@@ -44,20 +44,23 @@ function gerarIdDps(cMun, cnpj, serie, nDps) {
 }
 
 function assinarXmlDps(xml, certPem, keyPem, certClean, idDps) {
+  const w3 = 'http:' + '//www.w3.org';
+  const c14n = w3 + '/TR/2001/REC-xml-c14n-20010315';
+  const rsaSha256 = w3 + '/2001/04/xmldsig-more#rsa-sha256';
+  const sha256 = w3 + '/2001/04/xmlenc#sha256';
+  const enveloped = w3 + '/2000/09/xmldsig#enveloped-signature';
+
   const sig = new SignedXml({
     privateKey: keyPem,
     publicCert: certPem,
-    signatureAlgorithm: 'http://w3.org',
-    canonicalizationAlgorithm: 'http://w3.org'
+    signatureAlgorithm: rsaSha256,
+    canonicalizationAlgorithm: c14n
   });
 
   sig.addReference({
     xpath: `//*[@Id='${idDps}']`,
-    digestAlgorithm: 'http://w3.org',
-    transforms: [
-      'http://w3.org',
-      'http://w3.org'
-    ]
+    digestAlgorithm: sha256,
+    transforms: [enveloped, c14n]
   });
 
   sig.getKeyInfoContent = () => `<X509Data><X509Certificate>${certClean}</X509Certificate></X509Data>`;
@@ -80,9 +83,8 @@ app.post('/nfse', async (req, res) => {
     const { certPem, keyPem, certClean } = extrairCertificadoPfx(certificadoBase64, senhaCertificado);
 
     const isProd = ambiente && ambiente.toLowerCase().includes('produ');
-    const baseUrl = isProd
-      ? 'https://nfse.gov.br'
-      : 'https://nfse.gov.br';
+    const hostSefin = isProd ? 'sefin.nfse.gov.br' : 'sefin.producaorestrita.nfse.gov.br';
+    const baseUrl = 'https:' + '//' + hostSefin + '/SefinNacional';
 
     const httpsAgent = new https.Agent({
       cert: certPem,
@@ -107,9 +109,10 @@ app.post('/nfse', async (req, res) => {
     const valorServ = Number(dps?.valor || 0).toFixed(2);
     const cTribNac = String(servico?.codigo || '010101').replace(/\D/g, '').padStart(6, '0');
     const descServ = (dps?.descricao || servico?.nome || 'Prestacao de servicos').replace(/[<>&'"]/g, '');
+    const nsNfse = 'http:' + '//www.sped.fazenda.gov.br/nfse';
 
     const xmlDps = `<?xml version="1.0" encoding="UTF-8"?>
-<DPS xmlns="http://fazenda.gov.br" versao="1.00">
+<DPS xmlns="${nsNfse}" versao="1.00">
   <infDPS Id="${idDps}">
     <tpAmb>${isProd ? '1' : '2'}</tpAmb>
     <dhEmi>${dhEmi}</dhEmi>
